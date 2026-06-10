@@ -1,0 +1,338 @@
+---
+sidebar_position: 3
+---
+
+# Atlas Client & Queries
+
+## Client Setup
+
+### 1. Configuration
+The Atlas client can be instantiated with the following options:
+```ts
+interface AtlasConfig {
+  chainId: string;
+  rpcEndpoint: string;
+  restEndpoint?: string;
+  gasPrice?: string;
+  gasAdjustment?: number;
+}
+```
+These parameters are only configurable once. The constructor validates that `chainId` and `rpcEndpoint` are present and throws immediately if either is missing.
+
+### 2. Initialization
+Initialization of the Atlas client involves setting up the query clients and marking the client as initialized. There are three primary ways the client can be initialized, 
+depending on the execution context you are working in.
+
+#### 2.1 Asynchronous Initialization
+The client is both instantiated and initialized using the `new` initializer method.
+```ts
+import { AtlasClient } from "atlas.js";
+
+const client = await AtlasClient.new({
+  chainId: "atlas-1",
+  rpcEndpoint: "https://rpc.atlasprotocol.cloud",
+})
+```
+
+#### 2.2 Semi-synchronous Initialization
+In certain cases, you may need to instantiate the client class in a synchronous context. Using the default initializer will leave the client in a 
+partially-initialized state where most of its features are not yet enabled. The client method `initialize()` must be called in an asynchronous context to complete the initialization of the client.
+```ts
+import { AtlasClient } from "atlas.js";
+
+// in a synchronous function
+const client = new AtlasClient({
+  chainId: "atlas-1",
+  rpcEndpoint: "https://rpc.atlasprotocol.cloud",
+})
+
+// ...
+// in an async function
+await client.initialize()
+```
+
+#### 2.3 Synchronous Initialization
+If it's undesirable or impossible to use asynchronous methods, the Atlas client can still be completely initialized within a synchronous context. In this case, instead of awaiting a promise, 
+the completion of the async method `initialize()` can be subscribed to using an event handler. Once the initialization is complete, the client emits a `ClientEvent.INITIALIZED` event.
+```ts
+import { AtlasClient } from "atlas.js";
+
+const client = new AtlasClient({
+  chainId: "atlas-1",
+  rpcEndpoint: "https://rpc.atlasprotocol.cloud",
+})
+
+client.on(ClientEvent.INITIALIZED, () => {
+  // ... do something
+})
+
+client.initialize()
+```
+
+### 3. Connect a wallet
+```ts
+import { WalletType } from 'atlas.js';
+
+await client.connectWallet(WalletType.KEPLR);
+```
+
+This attempts to disconnect any previously connected wallet, and then initialises the Keplr adapter. Once the promise resolves, the wallet is ready for signing and broadcasting.
+
+## Client States
+The client offers the following properties and methods to probe its state:
+
+`AtlasClient.address` : provides the connected wallet's address, if any
+
+`AtlasClient.isInitialized()` : returns `true` if initialized, otherwise returns `false`
+
+`AtlasClient.isWalletConnected()` : returns `true` if a wallet is connected, otherwise returns `false`
+
+`AtlasClient.getWalletType()` : get the type of wallet currently connected, if any
+
+## Client Helpers
+
+Convenience methods for common operations beyond simple queries.
+
+### signAndBroadcast
+
+```ts
+const response: IndexedTx = await client.signAndBroadcast(
+  messages,                    // EncodeObject[] — protobuf-encoded messages
+  { memo: 'my tx', gas: 'auto' } // optional TxOptions
+);
+```
+
+Signs a set of protobuf messages with the connected wallet's key, broadcasts
+them to the chain, and polls until the transaction is included.
+
+**Parameters**
+
+- `messages: EncodeObject[]` — array of protobuf-encoded messages to include in the transaction
+- `options?: TxOptions` — optional fee, gas, and memo overrides
+
+**Return type** — `IndexedTx` with on-chain result, including `transactionHash`, `code`, and `rawLog`
+
+**Throws** if no wallet is connected, broadcasting fails, or the transaction does not confirm within the 12-second polling timeout.
+
+### signMessage
+
+```ts
+const signature: string = await client.signMessage(
+  'data to sign'             // string | Uint8Array
+);
+```
+
+Signs an arbitrary message using the active wallet's key. Useful for authentication
+challenges or offline verification.
+
+**Parameters**
+
+- `message: string | Uint8Array` — the data to sign
+
+**Returns** — `string` containing the raw signature
+
+**Throws** if no wallet is connected.
+
+### createStorageHandler
+
+```ts
+const handler: StorageHandler = client.createStorageHandler();
+```
+
+Creates a new `StorageHandler` instance initialized with the current client
+and its connected wallet. The handler manages the full storage lifecycle:
+loading subscriptions, providers, drives, directory trees, file uploads, and
+encryption.
+
+## Atlas Queries
+
+The client exposes a `query` object with typed methods for all read operations. Every method returns a promise.
+
+### Storage Stats
+
+```ts
+const stats: StorageStats = await client.query.storageStats();
+```
+
+Returns network-level storage aggregate data.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `subscriptionCount` | `number` | Total active subscriptions |
+| `spacePurchased` | `number` | Total space purchased across all subscriptions |
+| `spaceUsed` | `number` | Total space used across all subscriptions |
+| `spaceReplicas` | `number` | Total replica space consumed |
+| `providerCount` | `number` | Total registered providers |
+| `spaceAvailable` | `number` | Remaining space available for purchase |
+
+### File Stats
+
+```ts
+const stats: FileStats = await client.query.fileStats();
+```
+
+Returns file-count aggregates across the network.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `totalFiles` | `number` | Total files stored on the network |
+| `strayFiles` | `number` | Files with incomplete replication |
+| `deadFiles` | `number` | Files that were lost due to failed storage and/or replication |
+
+### File by ID
+
+```ts
+const file: File = await client.query.file('fid123...');
+```
+
+Looks up a single file by its unique file ID (`fid`).
+
+**Parameters**
+
+- `fid: string` — the file identifier
+
+**Return type** — `File`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `fid` | `string` | File identifier |
+| `merkle` | `string` | Merkle root hash of the file |
+| `creator` | `string` | Creator wallet address |
+| `subscription` | `string` | Subscription ID the file belongs to |
+| `status` | `string` | Current file status [ `STAGED` \| `STRAY` \| `ACTIVE` \| `DEAD` ] |
+| `fileSize` | `number` | Size of the file in bytes |
+| `replicas` | `number` | Number of replicas stored |
+| `providers` | `string[]` | Addresses of current storage providers |
+| `unstableProviders` | `string[]` | Addresses of providers failed the latest proof challenge for the file |
+| `start` | `number` | UNIX timestamp when the file was stored |
+
+### Subscription
+
+```ts
+const sub: StorageSubscription = await client.query.subscription(
+  'atl1...address',
+  'sub-123' // optional — omitting returns the default subscription
+);
+```
+
+Looks up a subscription by subscriber address and optional subscription ID. If no ID is provided, the default subscription for that address is returned.
+
+> **Note:** The values returned for `spaceUsed` and `spaceAvailable` are divided by 3 to account for replica overhead.
+
+**Parameters**
+
+- `address: string` — subscriber wallet address
+- `id?: string` — optional subscription ID (defaults to the user's primary subscription)
+
+**Return type** — `StorageSubscription`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | Subscription ID |
+| `start` | `Date` | Subscription start date |
+| `end` | `Date` | Subscription expiry date |
+| `status` | `string` | Subscription status (e.g. pending, active, expired) |
+| `spaceAvailable` | `number` | Available storage quota (divided by 3) |
+| `spaceUsed` | `number` | Storage consumed (divided by 3) |
+| `replicaSpaceUsed` | `number` | Space used by replicas |
+| `credits` | `string` | Remaining credits (string-encoded number) |
+
+### Subscriptions
+
+```ts
+// All subscriptions across all addresses
+const allSubs: StorageSubscription[] = await client.query.subscriptions();
+
+// All subscriptions for a specific address
+const userSubs: StorageSubscription[] = await client.query.subscriptions(
+  'atl1...address'
+);
+```
+
+Returns subscriptions. When `address` is provided, returns all subscriptions
+for that wallet address. When omitted, returns subscriptions across all addresses.
+
+**Parameters**
+
+- `address?: string` — optional wallet address to filter by
+
+**Return type** — `StorageSubscription[]` (see single subscription table above)
+
+### Provider
+
+```ts
+const provider: Provider = await client.query.provider(
+  'atl1...provider'
+);
+```
+
+Looks up a storage provider by address.
+
+**Parameters**
+
+- `address: string` — provider wallet address
+
+**Return type** — `Provider`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `address` | `string` | Provider wallet address |
+| `hostname` | `string` | Provider hostname |
+| `spaceAvailable` | `number` | Provider storage capacity |
+| `spaceUsed` | `number` | Storage currently in use |
+| `createdAt` | `number` | Registration block height or timestamp |
+| `creditDelta` | `number` | Reward credit delta |
+
+### Providers
+
+```ts
+const providers: Provider[] = await client.query.providers();
+```
+
+Returns all registered storage providers. No parameters required.
+
+**Return type** — `Provider[]` (see single provider table above)
+
+### FileTree Node
+
+```ts
+const node: TreeNode = await client.query.treeNode(
+  'atl1...owner',
+  '/path/to/node'
+);
+```
+
+Looks up a single node in a user's file tree by owner address and path.
+
+**Parameters**
+
+- `owner: string` — wallet address of the tree owner
+- `path: string` — path to the node
+
+**Return type** — `TreeNode`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `nodeType` | `string` | Type of the node (file or directory) |
+| `contents` | `string` | Encoded contents or metadata reference |
+| `viewers` | `string` | Viewers access control data |
+| `editors` | `string` | Editors access control data |
+| `encryption` | `EncryptionType` | Encryption status: `PUBLIC` (0), `ENCRYPTED` (1), or `PASSWORD_PROTECTED` (2) |
+
+### FileTree Node Children
+
+```ts
+const children: TreeNode[] = await client.query.treeNodeChildren(
+  'atl1...owner',
+  '/path/to/directory'
+);
+```
+
+Returns the child nodes of a directory in a user's file tree.
+
+**Parameters**
+
+- `owner: string` — wallet address of the tree owner
+- `path: string` — path to the directory
+
+**Return type** — `TreeNode[]` (see tree node table above)

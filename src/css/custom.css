@@ -1,0 +1,37 @@
+/* Atlas Protocol brand theme — dark-first */
+:root {
+  --ifm-color-primary: #72a7ff;
+  --ifm-color-primary-dark: #5a96f0;
+  --ifm-color-primary-darker: #4a8aea;
+  --ifm-color-primary-darkest: #2e6fc9;
+  --ifm-color-primary-light: #8fb9ff;
+  --ifm-color-primary-lighter: #a3c6ff;
+  --ifm-color-primary-lightest: #c8ddff;
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(114, 167, 255, 0.1);
+  --ifm-background-color: #ffffff;
+  --ifm-navbar-background-color: rgba(255, 255, 255, 0.92);
+  --atlas-accent-2: #70d3c2;
+  --atlas-surface-strong: #f0f4ff;
+  --atlas-panel: #f5f8ff;
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #72a7ff;
+  --ifm-color-primary-dark: #5a96f0;
+  --ifm-color-primary-darker: #4a8aea;
+  --ifm-color-primary-darkest: #2e6fc9;
+  --ifm-color-primary-light: #8fb9ff;
+  --ifm-color-primary-lighter: #a3c6ff;
+  --ifm-color-primary-lightest: #c8ddff;
+  --docusaurus-highlighted-code-line-bg: rgba(114, 167, 255, 0.15);
+  --ifm-background-color: #070a10;
+  --ifm-background-surface-color: #0d121c;
+  --ifm-navbar-background-color: rgba(7, 10, 16, 0.85);
+  --ifm-color-content: #edf3ff;
+  --ifm-color-content-secondary: #aebddb;
+  --ifm-heading-color: #edf3ff;
+  --atlas-accent-2: #70d3c2;
+  --atlas-surface-strong: #111a28;
+  --atlas-panel: #121b2a;
+}

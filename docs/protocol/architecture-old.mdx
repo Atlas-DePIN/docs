@@ -1,0 +1,99 @@
+---
+sidebar_position: 6
+---
+
+# Architecture
+
+## Layered design
+
+The SDK is built in three layers, each with a clear responsibility.
+
+```
+┌─────────────────────────────┐
+│       AtlasClient           │  Facade -- public API surface
+│  (EventEmitter)             │  Wallet + query lifecycle
+├─────────────────────────────┤
+│       WalletManager         │  Orchestrator -- manages active adapter
+│  (EventEmitter)             │  Disconnect-first connect, event forwarding
+├─────────────────────────────┤
+│    ┌──────────┐ ┌────────┐  │
+│    │ Keplr    │ │ Leap   │  │  Adapters -- one class per wallet type
+│    │ Wallet   │ │ Wallet │  │
+│    └──────────┘ └────────┘  │
+└─────────────────────────────┘
+       QueryHelper             Read-only queries (storage, file tree)
+```
+
+### AtlasClient
+
+The top-level entry point. It:
+
+- Validates configuration on construction.
+- Creates a `WalletManager` internally.
+- Provides `initialize()` to set up the protobuf RPC query client.
+- Exposes `query` for domain-specific reads.
+- Forwards wallet connect/disconnect events so consumers can listen on the client directly.
+
+### WalletManager
+
+Manages exactly one active wallet adapter at a time. Key behaviours:
+
+- Calling `connect()` disconnects any existing wallet before connecting the new one.
+- Delegates signing, query client access, and address retrieval to the underlying adapter.
+- Emits `connected` and `disconnected` events that `AtlasClient` forwards.
+
+### Wallet adapters
+
+Each adapter extends `BaseWallet` and implements four abstract methods: `connect`, `disconnect`, `getWalletType`, and `signArbitrary`. The adapter is responsible for:
+
+- Initialising the offline signer (e.g. Keplr's `window.keplr`).
+- Creating query and signing Stargate clients via `initializeClients()`.
+- Registering the Atlas protobuf type registry so the signing client can encode custom message types.
+
+### QueryHelper
+
+A separate class focused entirely on read operations. It wraps the generated protobuf query client and exposes typed methods for:
+
+- Storage stats and file stats
+- Subscription lookups (single and multi)
+- File and provider queries
+- File tree node and node children queries
+
+## Lifecycle
+
+```
+constructor
+    |
+    v
+create WalletManager
+setup event forwarding
+    |
+    v
+initialize()
+    |
+    v
+create RPC query client
+create QueryHelper
+set _isInitialized = true
+emit INITIALIZED
+    |
+    v
+connectWallet(type)
+    |
+    v
+disconnect existing wallet
+create adapter (Keplr, etc.)
+adapter.connect()
+emit CONNECTED
+    |
+    v
+sign & broadcast / query / etc.
+    |
+    v
+dispose()
+    |
+    v
+disconnectWallet()
+set _isInitialized = false
+removeAllListeners()
+```

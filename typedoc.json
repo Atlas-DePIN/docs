@@ -1,0 +1,17 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["../src/index.ts"],
+  "out": "./docs/api",
+  "name": "atlas.js",
+  "plugin": ["typedoc-plugin-markdown"],
+  "excludePrivate": true,
+  "excludeProtected": false,
+  "excludeInternal": true,
+  "includeVersion": true,
+  "readme": "none",
+  "hideGenerator": true,
+  "hideBreadcrumbs": false,
+  "skipErrorChecking": true,
+  "tsconfig": "../tsconfig.json",
+  "cleanOutputDir": true
+}

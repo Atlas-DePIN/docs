@@ -1,0 +1,79 @@
+---
+sidebar_position: 2
+---
+
+# Getting Started
+
+## Installation
+
+```bash
+npm install atlas.js
+```
+
+## Basic usage
+
+### 1. Create a client
+```ts
+import { AtlasClient } from 'atlas.js';
+
+const client = await AtlasClient.new({
+  chainId: 'atlas-1',
+  rpcEndpoint: 'https://rpc.atlasprotocol.cloud',
+})
+```
+The constructor validates that `chainId` and `rpcEndpoint` are present and throws immediately if either is missing.
+
+### 2. Connect a wallet
+
+```ts
+import { WalletType } from 'atlas.js';
+
+await client.connectWallet(WalletType.KEPLR);
+```
+
+This attempts to disconnect any previously connected wallet, and then initialises the Keplr adapter. Once the promise resolves, the wallet is ready for signing and broadcasting.
+
+### 3. Query chain data
+
+```ts
+// Storage statistics
+const stats = await client.query.storageStats();
+
+// File by ID
+const file = await client.query.file('some-fid');
+
+// Subscription details
+const sub = await client.query.subscription('atl1...address');
+
+// File tree node
+const node = await client.query.treeNode('atl1...owner', '/path/to/file');
+```
+
+### 4. Sign and broadcast a transaction
+
+```ts
+const response = await client.signAndBroadcast(messages);
+
+console.log('Tx hash:', response.transactionHash);
+```
+
+`signAndBroadcast` polls until the transaction is included on chain (default 12 second timeout) and returns the full indexed transaction.
+
+### 5. Disconnect and clean up
+
+```ts
+await client.dispose();
+```
+
+This disconnects the wallet, marks the client as uninitialised, and removes all event listeners.
+
+## Using the static factory
+
+```ts
+const client = await AtlasClient.newAtlasClient({
+  chainId: 'atlas-1',
+  rpcEndpoint: 'https://rpc.atlasprotocol.cloud',
+});
+```
+
+The factory calls `initialize()` for you, so the query client is ready immediately.
