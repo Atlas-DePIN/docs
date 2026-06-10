@@ -47,7 +47,8 @@ const config: Config = {
       title: 'Atlas Protocol',
       logo: {
         alt: 'Atlas Protocol',
-        src: 'img/atlasprotocol_logo.png',
+        src: 'img/atlasprotocol_logo_black.png',
+        srcDark: 'img/atlasprotocol_logo.png',
       },
       items: [
         {
