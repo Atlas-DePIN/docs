@@ -1,0 +1,398 @@
+---
+sidebar_position: 2
+---
+
+# `x/storage` — Storage Module
+
+The `x/storage` module is the lead indexer and orchestrator of the DePIN storage network. It handles storage accounting, subscription management, provider registration, file indexing, proof-of-persistence challenges, and reward distribution.
+
+## Responsibilities
+
+- Storage accounting using byte-second credits.
+- Tracking user storage subscriptions.
+- Registering and managing storage providers.
+- Indexing files and their replication across providers.
+- Issuing and verifying proofs-of-persistence.
+- Computing and distributing provider rewards.
+
+## Storage Credits
+
+Storage is represented in units of **byte-seconds**. One storage credit corresponds to storing one byte for one second. This multi-dimensional representation directly couples data size with retention duration, enabling fair and granular billing.
+```
+C = S × T
+```
+Where `S` is the storage size in bytes (including replicas) and `T` is the duration in seconds.
+
+### Credit Minting
+The module maintains a storage credit pool. When a subscription is created, credits representing the amount of storage for the given duration are minted in this pool.
+Funds used to purchase the subscription are sent to a storage rewards pool.
+```
+C = 3 × S × T
+```
+Where `S` is the subscription size and `T` is the duration in seconds. The subscription size is multiplied by 3, assuming standard 3x file replication.
+
+
+### Credit Allocation
+Subscriptions do not hold any storager credits. They maintain a value representing their unused allocation of the credit pool. 
+When a file is uploaded, their allocation is decremented by `file_size × replicas × remaining_subscription_duration`. 
+When a file is deleted, credits are returned proportional to the remaining subscription duration.
+
+Upon rewards distribution, credits are not sent to the storage providers. Credits equivalent to the storage consumed for a given duration are burned, 
+and the providers will recieve compensation in $ATL from the storage rewards pool proportional to how much data they've stored between now and the last rewards period.
+
+A subscription is almost always going to have a residual credit allocation upon expiry. These credits are burned and their equivalent rewards are transfered to 
+a pool of protocol owned liquidity (POL).
+
+
+**Summary**:
+- Credits are never distributed from the pool, they are allocated.
+- Each subscription tracks its maximum allocation and how much has been used.
+- On subscription expiry, residual credits are converted to tokens and moved to protocol-owned liquidity (POL).
+
+### Credit Manipulation
+
+[TODO]: the diragrams are done
+
+### Subscription Expiry Caveat
+
+[TODO]: explain the problem...
+
+## Subscriptions
+
+Users reserve storage capacity through subscriptions. A subscription reserves a given capacity for a fixed period. Subscriptions can be purchased for oneself or on behalf of another user.
+Users can mark a subscription as their default. When posting files without specifying a subscription, the chain selects the default subscription or the last-purchased active subscription with available storage.
+
+### Subscription Object
+
+```protobuf
+message StorageSubscription {
+  string id = 1;
+  Timestamp start = 2;
+  Timestamp end = 3;
+  string status = 4;          // ACTIVE, PENDING, EXPIRED
+  int64 spaceAvailable = 5;   // reserved capacity in bytes
+  int64 spaceUsed = 6;        // actively used capacity in bytes
+  int64 replicaSpaceUsed = 7; // space consumed by replicas
+  string credits = 8;         // available storage credits (math.Int)
+}
+```
+
+### Subscription Statuses
+
+| Status | Description |
+|--------|-------------|
+| **ACTIVE** | The subscription is usable; new files can be posted against it. |
+| **PENDING** | Purchased for another user but not yet accepted. Exists to prevent spam. |
+| **EXPIRED** | The end time has passed; remains in the store for historical indexing. |
+
+### BuyStorage Message
+
+Purchase a new storage subscription.
+
+```protobuf
+message MsgBuyStorage {
+  string creator = 1;
+  string receiver = 2;  // optional — purchase on behalf of another user
+  int64 duration = 3;   // duration in seconds
+  int64 bytes = 4;      // capacity in bytes
+  bool is_default = 5;  // set as default subscription
+}
+```
+
+- Standard replication factor is 3, so real allocated capacity is 3 × purchased capacity.
+- At current parameters, storage costs $12/TB/month (governance-adjustable).
+- The buyer must have sufficient $ATL balance at the time of transaction.
+
+### ExpandStorage Message
+
+Extend an existing subscription in duration, capacity, or both.
+
+```protobuf
+message MsgExpandStorage {
+  string creator = 1;
+  string subscription_id = 2;
+  int64 duration = 3;   // additional duration in seconds
+  int64 bytes = 4;      // additional capacity in bytes
+}
+```
+
+New storage credits are minted and the subscription's `end` or `spaceAvailable` parameters are updated accordingly. 
+There is no shrinking or refund policy. This is to be investigated for future releases.
+
+## Providers
+
+Storage providers are the backbone of the DePIN network. They commit capacity, store file data, respond to proof challenges, and earn rewards.
+
+### Provider Object
+
+```protobuf
+message Provider {
+  string address = 1;
+  string hostname = 2;
+  int64 space_available = 3;  // total committed capacity
+  int64 space_used = 4;       // currently utilized capacity
+  int64 created_at = 5;
+  int64 credit_delta = 6;     // accumulated reward delta
+}
+```
+
+### RegisterProvider Message
+
+Register a new storage provider on the network.
+
+```protobuf
+message MsgRegisterProvider {
+  string creator = 1;
+  string hostname = 2;
+  int64 capacity = 3;
+}
+```
+
+### UpdateProvider Message
+
+Update a provider's hostname or capacity.
+
+```protobuf
+message MsgUpdateProvider {
+  string creator = 1;
+  string hostname = 2;
+  int64 capacity = 3;
+}
+```
+
+The creator must have at least **10'000 $ATL** available in their wallet to update a provider. This amount is held as a security deposit and is returned in full when the provider is sunsetted (removed from the network).
+
+## Files
+
+Files are indexed in the key-value store under the prefix `files/<creator_address>/<subscription_id>/<file_id>`.
+
+### File Object
+
+```protobuf
+message File {
+  string fid = 1;            // file identifier
+  string merkle = 2;         // merkle root hash
+  string creator = 3;        // creator wallet address
+  string subscription = 4;   // associated subscription ID
+  string status = 5;         // STAGED or ACTIVE
+  int64 file_size = 6;
+  int32 replicas = 7;
+  repeated string providers = 8;           // confirmed providers
+  repeated string unstable_providers = 9;  // providers still proving
+  int64 start = 10;                         // creation block height
+}
+```
+
+### File Identification
+
+The file ID (FID) is a SHA-256 hash of:
+
+```
+<merkle_root>:<creator_address>:<de-duplication_index>
+```
+
+The de-duplication index prevents collisions when a user uploads identical copies of the same file and is calculated by the client.
+
+### PostFile
+
+Submit a file to the network.
+
+```protobuf
+message MsgPostFile {
+  string creator = 1;
+  string fid = 2;
+  bytes merkle = 3;
+  int64 file_size = 4;
+  int32 replicas = 5;
+  string subscription = 6;
+}
+```
+
+1. The client builds a Merkle tree of the file divided into 1 KiB chunks.
+2. A `PostFile` request is broadcast, submitting the metadata and Merkle root.
+3. The file status is set to **STAGED** and the subscription's space used is incremented.
+4. The client uploads the file data directly to a storage provider.
+5. The provider submits a proof for the first chunk to attest receipt and capability.
+6. On valid proof, the provider is added to the file's provider list. The status becomes **STRAY** while the file awaits additional replicas. Once enough providers have proven the file to meet the replica requirement, the status transitions to **ACTIVE**.
+
+### DeleteFile
+
+Remove a file from the network.
+
+```protobuf
+message MsgDeleteFile {
+  string creator = 1;
+  string file_id = 2;
+}
+```
+
+Remaining storage credits are computed and re-allocated to the subscription. The subscription's space used and the provider's storage usage are decremented.
+
+### File Statuses
+
+| Status | Description |
+|--------|-------------|
+| **STAGED** | Submitted on-chain but not yet proven by any provider. |
+| **STRAY** | Proven by at least one provider but has not yet reached the required number of replicas. Awaiting additional providers to pick up the file. |
+| **ACTIVE** | Fully replicated — the required number of providers have proven the file. |
+| **DEAD** | All providers that held the file have failed their proof challenges and no provider carries the file anymore. The file is considered lost. |
+
+## Proof of Persistence
+
+Atlas Protocol uses a deterministic challenge mechanism to verify that providers are actually storing the files they claim to hold.
+
+### Merkle Tree Construction
+
+A two-layer hybrid hash scheme is used:
+
+- **Leaf hashes**: Blake3 cryptographic hash of each 1 KiB data chunk.
+- **Internal nodes**: XXH3-128bit non-cryptographic hash (approximately 10× faster than Blake3 for Merkle node construction).
+
+### Challenge Structure
+
+```protobuf
+message StorageChallenge {
+  string challenge_id = 1;
+  string file_id = 2;
+  string file_merkle = 3;
+  string provider = 4;
+  uint64 chunk_index = 5;
+  uint64 created_height = 6;
+  uint64 deadline_height = 7;
+}
+```
+
+### Challenge Windows
+
+Time is divided into **proof windows** of fixed block length (`ProofWindowBlocks`). Each window is further divided into **proof rounds** of fixed block length (`ProofRoundBlocks`). Every round, a batch of files is selected for challenge using an iteration cursor that advances through the file index.
+
+**Window initialization** (`StartChallengeWindow`):
+
+- Called once per window boundary.
+- Takes a snapshot of the current total file count — this frozen count determines how many files are eligible across all rounds in the window.
+- Resets the iteration cursor to the start position.
+
+**Cursor Direction alternation**:
+
+- Even-numbered windows iterate **ascending** through the file store.
+- Odd-numbered windows iterate **descending**.
+- This ensures files at the edges of the key space are not systematically skipped across consecutive windows.
+
+**Round processing** (`StartChallengeRound`):
+
+- Computes how many files to challenge this round using an equation to distribute the total load evenly:
+
+  ```
+  filesThisRound = (N × R × (round + 1) + W - 1) / W - (N × R × round + W - 1) / W
+  ```
+
+  Where `N` = total eligible files, `R` = `ProofRoundBlocks`, `W` = `ProofWindowBlocks`.
+
+- Iterates through the file store starting from the last cursor position, collecting `filesThisRound` eligible files (skipping `STAGED` and `DEAD` files).
+- For each eligible file, a challenge is issued to **every provider** currently holding that file.
+- Updates the cursor to the last processed file so the next round continues from where it left off.
+
+**Challenge generation** (`IssueChallengeForFile`):
+
+For each provider of a file, the challenged chunk is selected deterministically:
+
+```
+seed = prevBlockHash || file.Fid || round || providerPosition
+chunkIndex = XXHash(seed) % totalChunks
+```
+
+- The hash of the previous block provides on-chain entropy.
+- Each provider within a file is challenged on a different chunk.
+- The challenge has a `DeadlineHeight` of `currentBlockHeight + ProofRoundBlocks`.
+
+**Missed challenge handling** (`HandleMissedChallenges`):
+
+At the end of each round, all active challenges are checked against their deadline:
+
+1. If a provider fails to respond before the deadline, their used space is decremented with a double-time penalty.
+2. If this is the **first** miss for this provider+file pair, the provider is placed in the file's `UnstableProviders` list as a warning.
+3. If the provider misses again while already unstable, they are **removed** from the file entirely.
+4. If this was the last provider for the file, the file's status becomes **DEAD**.
+
+### Proving a File
+
+```protobuf
+message MsgProveFile {
+  string creator = 1;
+  string challenge_id = 2;
+  string fid = 3;
+  bytes data = 4;          // the challenged chunk data
+  repeated bytes hashes = 5;  // Merkle sibling hashes
+  uint64 chunk = 6;
+  uint64 path = 7;         // path bits for unbalanced tree
+}
+```
+
+## Rewards Distribution
+
+At the end of each proof round, provider rewards are computed and distributed. The mechanism is driven by:
+
+**`LastRewardsTime`** — Tracks the last block timestamp when rewards were distributed. On first initialization it is set to the current block time and distribution is skipped.
+
+**`StorageCreditPool`** — The total pool of outstanding storage credits held by the module. Provider rewards are a proportion of this pool.
+
+**`CreditDelta`** — Each provider carries a `CreditDelta` that accounts for space changes between reward rounds. When a provider's space used changes mid-round (files added or removed), the delta captures the difference so the next reward calculation remains accurate.
+
+### Reward Calculation
+
+For each provider, earned credits are computed as:
+
+```
+credits = Δt × spaceUsed + creditDelta
+```
+
+Where `Δt` is the time elapsed since the last distribution. If `credits` is negative (e.g. from a `CreditDelta` carryover), the negative value is forwarded to the next round and no distribution occurs for that provider.
+
+Provider tokens are then distributed proportionally from the module's token balance:
+
+```
+tokens = poolTokens × credits / totalPoolCredits
+```
+
+### Stray Files
+
+At the end of each reward round, rewards that would have been paid for **STRAY** files (files that haven't reached full replication) are redirected to **protocol-owned liquidity (POL)** instead of any specific provider.
+
+## Queries
+
+### Stats Queries
+
+| Query | Endpoint | Returns |
+|-------|----------|---------|
+| `StorageStats` | `/atlas/storage/v1/storage_stats` | Network-level aggregates: subscription count, space purchased, space used, replica space, provider count, space available |
+| `FileStats` | `/atlas/storage/v1/file_stats` | Total files, stray files, and dead files |
+
+### Provider Queries
+
+| Query | Endpoint | Description |
+|-------|----------|-------------|
+| `Provider` | `/atlas/storage/v1/provider/{address}` | Single provider by address |
+| `Providers` | `/atlas/storage/v1/providers` | List all registered providers |
+
+### File Queries
+
+| Query | Endpoint | Description |
+|-------|----------|-------------|
+| `File` | `/atlas/storage/v1/file/{fid}` | Single file by FID |
+| `Files` | `/atlas/storage/v1/files` | Paginated files by creator and subscription |
+| `Strays` | `/atlas/storage/v1/strays` | Files needing additional replicas |
+
+### Subscription Queries
+
+| Query | Endpoint | Description |
+|-------|----------|-------------|
+| `Subscription` | `/atlas/storage/v1/subscription` | Single subscription by address and ID |
+| `Subscriptions` | `/atlas/storage/v1/subscriptions` | All subscriptions for an address |
+
+### Challenge Queries
+
+| Query | Endpoint | Description |
+|-------|----------|-------------|
+| `Challenges` | `/atlas/storage/v1/challenges` | Challenges for a provider, paginated |
+
+

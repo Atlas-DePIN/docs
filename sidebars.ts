@@ -7,6 +7,8 @@ const sidebars: SidebarsConfig = {
       label: 'Atlas Protocol',
       items: [
         'protocol/architecture',
+        'protocol/x-storage',
+        'protocol/x-filetree',
       ],
     },
     {
