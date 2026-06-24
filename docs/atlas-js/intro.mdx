@@ -18,8 +18,8 @@ const client = new AtlasClient({
 
 await client.connectWallet(WalletType.KEPLR);
 
-const balance = await client.query.storageStats();
-console.log(balance);
+const stats = await client.query.storageStats();
+console.log(stats);
 ```
 
 ## What's included

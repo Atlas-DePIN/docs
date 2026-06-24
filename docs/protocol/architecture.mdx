@@ -1,5 +1,60 @@
 ---
-sidebar_position: 6
+sidebar_position: 1
 ---
 
 # Architecture
+
+Atlas Protocol is a Layer 1 CometBFT-based blockchain purpose-built for decentralized storage at planetary scale. It introduces a multi-dimensional storage credit mechanism that represents usage in byte-seconds, enabling fair reward distribution proportional to actual storage provided while eliminating complex per-user accounting. The protocol separates the **control plane** (on-chain: subscriptions, file indices, challenges, rewards) from the **data plane** (off-chain: file bytes stored by providers).
+
+## Design Overview
+
+A Proof of Stake blockchain secured by economic stake — validators lock ATL tokens as collateral, propose and vote on blocks with voting power weighted by stake size. Built on **CometBFT** (BFT consensus, tolerating up to ⅓ malicious validators) and the **Cosmos SDK** framework.
+
+The native token is **ATL** (micro-denomination: **uatl**).
+
+## Network Model
+
+The network consists of four actor classes. Validators secure the chain via CometBFT consensus, while providers store the actual file data off-chain. The **control plane** (subscriptions, file indices, challenges, rewards) lives entirely on-chain. The **data plane** (file bytes) is stored and served off-chain by providers. Files are replicated across multiple providers for redundancy.
+
+| Actor | Role |
+|-------|------|
+| **Validators** | Secure the blockchain — process transactions, finalize blocks, enforce protocol rules |
+| **Providers** | Commit capacity, store and serve file data, respond to proof challenges, earn rewards |
+| **Clients** | Download files from providers, use the blockchain as an index |
+| **Users** | Purchase storage, upload/delete files, manage permissions, participate in governance |
+
+<img src={require('/img/AtlasProtocol_NetworkOverview.png').default} alt="Atlas Protocol network overview" style={{maxWidth: '800px', borderRadius: '8px', margin: '2rem auto', display: 'block'}} />
+
+## Module Overview
+
+| Module | Purpose |
+|--------|---------|
+| **`x/storage`** | Storage accounting (byte-second credits), subscriptions, provider registration, file indexing, proof-of-persistence challenges, reward distribution |
+| **`x/filetree`** | Optional hierarchical file system abstraction — human-readable paths, directories, access control on top of FIDs managed by `x/storage` |
+| **`x/oracle`** | ATL token price feed from external markets, used to parameterize storage costs and other economic functions |
+
+## Storage Credits
+
+Storage is measured in **byte-seconds** — one credit = storing one byte for one second. This couples data size with retention duration, enabling granular billing and fair reward distribution. Credits are minted on subscription purchase, allocated per subscription, and burned on reward distribution. Residual credits from expired subscriptions become protocol-owned liquidity.
+
+## File Lifecycle
+
+Files are identified by `SHA256(merkle_root \|\| creator \|\| nonce)`, keyed on-chain as `(creator, subscription_id, fid)`. A file progresses through **STAGED** → **STRAY** → **ACTIVE** statuses as providers prove they hold it, or becomes **DEAD** if all providers fail their proof challenges.
+
+<img src={require('/img/AP_FileUploadWorkflow.png').default} alt="File upload workflow" style={{maxWidth: '800px', borderRadius: '8px', margin: '2rem auto', display: 'block'}} />
+
+<img src={require('/img/AP_FileDeleteWorkflow.png').default} alt="File delete workflow" style={{maxWidth: '700px', borderRadius: '8px', margin: '2rem auto', display: 'block'}} />
+
+## Proof of Persistence
+
+Providers are challenged each proof round via a cursor iterating through the file store. Direction alternates per window (ascending/descending) to prevent edge bias. Each provider of a file is challenged on a deterministic chunk derived from:
+
+```
+chunkIndex = XXH3(prevBlockHash || fid || round || providerIndex) % totalChunks
+```
+
+Merkle trees use a hybrid scheme — **Blake3** cryptographic leaves (1 KiB chunks) with **XXH3-128bit** internal nodes — balancing security with ~10× faster proof computation. Missed challenges incur a double-time penalty; repeated misses remove the provider and can mark the file as DEAD.
+
+## Governance
+
+ATL holders vote on parameter changes and upgrades. Voting period is 14 days with 51% quorum. Major upgrades (state-affecting) require a governance vote; minor upgrades (non-consensus-breaking) do not.

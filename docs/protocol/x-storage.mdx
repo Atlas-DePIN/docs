@@ -33,7 +33,9 @@ Where `S` is the subscription size and `T` is the duration in seconds. The subsc
 
 
 ### Credit Allocation
-Subscriptions do not hold any storager credits. They maintain a value representing their unused allocation of the credit pool. 
+Subscriptions do not hold any storager credits. They maintain a value representing their unused allocation of the credit pool.
+
+<img src={require('/img/AP_StorageCreditMechanism.png').default} alt="Storage credit flow" style={{maxWidth: '700px', borderRadius: '8px', margin: '2rem auto', display: 'block'}} /> 
 When a file is uploaded, their allocation is decremented by `file_size × replicas × remaining_subscription_duration`. 
 When a file is deleted, credits are returned proportional to the remaining subscription duration.
 

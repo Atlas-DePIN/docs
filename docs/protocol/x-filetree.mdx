@@ -1,0 +1,94 @@
+---
+sidebar_position: 3
+---
+
+# `x/filetree` — File Tree Module
+
+The `x/filetree` module provides a hierarchical logical file system abstraction on top of the lower-level file identifiers tracked by `x/storage`. While the storage module is concerned with the physical layout of files across providers and subscriptions, most applications and end-users think in terms of logical paths, directories, and shared workspaces. This module bridges that gap.
+
+## Design Goals
+
+- **Human-friendly organization**: expose files via paths such as `/users/alice/photos/2025/trip.jpg` instead of opaque FIDs.
+- **Separation of concerns**: decouple logical naming, sharing, and access semantics from the underlying storage and proof-of-persistence machinery.
+- **Efficient lookups**: enable constant or logarithmic-time resolution from path to FID, even as the number of files grows to millions.
+- **Minimal on-chain footprint**: store only the metadata required to reconstruct namespaces and enforce permissions, leaving content and heavy indices off-chain where possible.
+
+## Data Model
+
+The module maintains a tree of nodes stored in a single `collections.Map` keyed by `(owner, directory, basename)`. Each node is one of:
+
+| Node Type | Description |
+|-----------|-------------|
+| **Directory** | Contains no content data itself — acts as a container for child nodes. |
+| **File** | Holds a reference to the underlying file identifier (FID) in `x/storage`, along with ownership and permission metadata. |
+
+A path is resolved by splitting it into segments and walking the tree:
+
+```
+resolve(owner, ["users", "alice", "photos", "photo.jpg"]) → fid
+```
+
+Nodes at different nesting levels are stored as separate entries in the key-value store, enabling efficient prefix scans for directory listings and tree traversal.
+
+### TreeNode Object
+
+```protobuf
+message TreeNode {
+  string node_type = 1;   // "file" or "directory"
+  string contents = 2;    // FID reference for file nodes
+  string viewers = 3;     // comma-separated addresses with read access
+  string editors = 4;     // comma-separated addresses with write access
+}
+```
+
+## Access Control
+
+Each node carries optional viewer and editor address lists. While Atlas Protocol does not prescribe a single global ACL model, the module is structured to support:
+
+- **Node-level ownership**: the creator address has full control over renames, moves, and deletions.
+- **Delegated access**: the `editors` field accepts comma-separated addresses for write access. The `viewers` field is application-defined — typically pairs of addresses and encrypted access keys, though any scheme can be used.
+
+Access control is enforced at the control plane level — providers are agnostic to logical paths and only see FIDs, while users and applications interact almost entirely with paths and high-level APIs.
+
+## Transactions
+
+### PostNode
+
+Creates a new node at the specified path under the creator's owner namespace.
+
+```protobuf
+message MsgPostNode {
+  string creator = 1;    // owner address
+  string path = 2;       // path (e.g. "docs/report.pdf")
+  string node_type = 3;  // "file" or "directory"
+  string contents = 4;   // FID for file nodes
+  string viewers = 5;    // optional viewer access list
+  string editors = 6;    // optional editor access list
+}
+```
+
+- Paths are lowercased and trimmed of leading/trailing slashes.
+- If the path contains `/`, the node is stored with the parent directory as the key prefix and the basename as the terminal key.
+- If the path has no `/`, the node is stored as a root-level entry.
+
+### DeleteNode
+
+Removes a node and all of its children recursively.
+
+```protobuf
+message MsgDeleteNode {
+  string creator = 1;    // owner address
+  string path = 2;       // path to remove
+}
+```
+
+- All descendant nodes within the subtree are removed in a single operation.
+- Recursive deletion is always enabled (there is no non-recursive variant).
+
+## Queries
+
+| Query | Endpoint | Returns |
+|-------|----------|---------|
+| `TreeNode` | `/atlas/filetree/v1/file_tree_node/{path}` | A single `TreeNode` by owner and path |
+| `FileTreePaths` | `/atlas/filetree/v1/file_tree_paths/{basepath}` | An array of path strings for immediate children of the specified base path |
+| `TreeNodeChildren` | `/atlas/filetree/v1/file_node_children/{owner}/{path}` | The full `TreeNode` objects for each child, suitable for directory listing UIs |
