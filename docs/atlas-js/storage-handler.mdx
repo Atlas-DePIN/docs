@@ -80,6 +80,7 @@ interface UploadOpts {
   replicas?: number;                // defaults to 3
   encryption?: IEncryptionOptions;  // for encrypted files
   provider?: string;                // specific provider hostname
+  maxProviderAttempts?: number;     // max providers to try before giving up
 }
 
 interface IEncryptionOptions {
