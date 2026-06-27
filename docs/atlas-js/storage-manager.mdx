@@ -1,0 +1,155 @@
+---
+sidebar_position: 4
+---
+
+# Storage Manager
+
+The `StorageManager` class manages the full storage lifecycle for a connected Atlas wallet. It loads subscription info, provider lists, drives, and directory contents from the chain, and provides a queue-based upload pipeline with encryption and filetree integration.
+
+```ts
+import { AtlasClient, StorageManager } from 'atlas.js';
+```
+
+## Creating a StorageManager
+
+```ts
+const client = await AtlasClient.new({ ... });
+const storage = await StorageManager.new(client);
+```
+
+The static `new` factory loads providers and the wallet's account (subscription, drives, default directory) before returning.
+
+## Directory management
+
+The manager keeps a loaded directory with its files, subdirectories, and objects. Navigate by calling `loadDirectory`:
+
+```ts
+await storage.loadDirectory('home');
+await storage.loadDirectory('home/docs');
+
+storage.directory      // IDirectory — metadata, files, subdirs, objects
+storage.directory.path // current path
+```
+
+## Drive management
+
+Drives are top-level containers. The manager automatically loads or creates a default "home" drive on startup.
+
+```ts
+storage.drives  // IAtlasDriveInfo[]
+```
+
+## Subscriptions
+
+### Loading
+
+```ts
+await storage.loadSubscription();
+// or with a specific ID:
+await storage.loadSubscription('sub-123');
+
+storage.subscription  // StorageSubscription
+```
+
+### Listing
+
+```ts
+const subs = await storage.listSubscriptions();
+```
+
+### Purchasing
+
+```ts
+const txHash = await storage.purchaseSubscription(
+  1_000_000_000,  // bytes — minimum 1 GB
+  30,              // days — minimum 1
+  true,            // isDefault
+  // optional receiver address, defaults to connected wallet
+);
+```
+
+Minimum purchase is 1 GB for 1 day.
+
+## Uploading files
+
+The upload pipeline has three steps: queue, process, and upload.
+
+### Queue files
+
+```ts
+// Public file (encryption optional via options.encryption)
+await storage.queuePublicFile(file, { replicas: 3 });
+
+// Private file (preserves encryption config from options)
+await storage.queuePrivateFile(file, {
+  replicas: 3,
+  encryption: { chunkSize: 1024 * 1024 }
+});
+```
+
+### Start the upload pipeline
+
+```ts
+// Upload to a specific provider
+await storage.startUploads('my-provider.atlasprotocol.cloud');
+
+// Or let the manager pick random providers from the loaded list
+await storage.startUploads();
+```
+
+The pipeline:
+1. Processes each file (encrypts if needed, builds merkle tree, generates FID)
+2. Commits file metadata to the chain
+3. Uploads file data to providers with retry logic
+
+When a specific provider is named, the manager retries the same provider up to 3 times. When omitted, it tries up to 5 distinct providers from the loaded provider list.
+
+## Downloading files
+
+Downloads a file by FID, looking up its assigned providers and any filetree metadata:
+
+```ts
+const file = await storage.downloadFile('fid123...', 'home/docs');
+```
+
+Tries each provider assigned to the file until one succeeds. If the file is encrypted, the AES key is extracted from the filetree viewer authorities.
+
+## Deleting files
+
+```ts
+const txHash = await storage.deleteFile('fid123...', 'home/docs');
+```
+
+Removes the file from storage and its filetree node. If the file is not found on-chain, it still cleans up the filetree entry.
+
+## Providers
+
+```ts
+// Load all providers
+await storage.loadProviders();
+
+// Load only specific providers by hostname
+await storage.loadProviders(['provider-a.atlasprotocol.cloud']);
+
+storage.providers  // Provider[]
+```
+
+## Events
+
+`StorageManager` extends `EventEmitter`. Listen for lifecycle events:
+
+```ts
+storage.on('navigate-directory', (path) => {
+  console.log('Navigated to', path);
+});
+
+storage.on('new-subscription', (sub) => { ... });
+storage.on('no-subscription', () => { ... });
+
+// File processing events
+storage.on('file:progress', (fileKey, progress) => { ... });
+storage.on('file:encrypted', (fileKey, data) => { ... });
+storage.on('file:merkle-built', (fileKey, data) => { ... });
+storage.on('file:ready', (fileKey) => { ... });
+storage.on('file:error', (fileKey, error) => { ... });
+```

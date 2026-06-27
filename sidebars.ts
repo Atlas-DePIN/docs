@@ -18,6 +18,7 @@ const sidebars: SidebarsConfig = {
         'atlas-js/intro',
         'atlas-js/getting-started',
         'atlas-js/atlas-client',
+        'atlas-js/storage-manager',
         'atlas-js/storage-handler',
       ],
     }

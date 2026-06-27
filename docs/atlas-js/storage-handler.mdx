@@ -1,6 +1,132 @@
 ---
-sidebar_position: 4
+sidebar_position: 5
 ---
 
 # Storage Handler
 
+The `StorageHandler` class provides methods for storage operations that interact exclusively with Atlas Protocol's x/storage module and storage providers.
+It is designed for clients that need more granular control; hence there is no uploading queueing, no subscription loading, and no filetree integrations.
+This is particularily useful for enterprises that want to index files their own way or make use of many subscriptions simultaneously.
+
+## Creating a StorageHandler
+
+```ts
+import { StorageHandler } from 'atlas.js';
+
+// Create an atlas client if you don't already have one
+// const client = await AtlasClient.new({chainId: "atlas-1", rpcEndpoint: "https://rpc.atlasprotocol.cloud"})
+
+const storage = new StorageHandler(client);
+```
+
+## Providers
+All upload and download operations require a provider to be known. You can either load all (or a set of) providers into the StorageHandler's state, 
+and it will use those providers by default, or you can pass a provider hostname argument to each call.
+
+```ts
+// Load all providers
+await storage.loadProviders();
+
+// Load only specific providers by hostname
+await storage.loadProviders(['provider-a.atlasprotocol.cloud']);
+
+storage.providers  // Provider[]
+```
+
+## Uploading files
+
+The `uploadFile` or `uploadFiles` method enables you to upload one or many files. Encryption, Merkle tree, chain commit, and provider upload happen in a single call. 
+The privacy level is set via the `Privacy` enum:
+
+```ts
+enum Privacy {
+  PUBLIC,
+  ENCRYPTED,
+}
+```
+
+### Single upload
+
+```ts
+import { Privacy } from 'atlas.js';
+
+// Public (unencrypted) upload
+const result = await storage.uploadFile(myFile, 'sub-456', Privacy.PUBLIC);
+result.fid   // string
+
+// Encrypted upload (with optional options)
+const result = await storage.uploadFile(myFile, 'sub-123', Privacy.ENCRYPTED, {
+  encryption: { chunkSize: 1024 * 1024 },
+});
+
+result.fid   // string
+result.aes   // IAesBundle — needed to decrypt later
+```
+
+### Batch upload
+
+```ts
+const results = await storage.uploadFiles([file1, file2], 'sub-123', Privacy.PUBLIC);
+results[0].fid  // string
+results[1].fid  // string
+```
+
+All files share the same subscription, privacy, and encryption settings. Processing runs in parallel and chain commits are batched into one transaction.
+
+### Upload Options
+
+```ts
+interface UploadOpts {
+  replicas?: number;                // defaults to 3
+  encryption?: IEncryptionOptions;  // for encrypted files
+  provider?: string;                // specific provider hostname
+}
+
+interface IEncryptionOptions {
+  chunkSize?: number;   // encryption chunk size, defaults to 1 MiB
+  aes?: IAesBundle;     // supply your own AES key
+}
+```
+
+## Downloading files
+
+Downloads a file by FID with automatic retry across all assigned providers. Pass the AES bundle to decrypt encrypted files.
+
+```ts
+// Public file
+const file = await storage.downloadFile('fid123...');
+
+// Encrypted file — pass the AES bundle used for upload
+const file = await storage.downloadFile('fid123...', aes);
+
+// From a specific provider
+const file = await storage.downloadFile('fid123...', null, 'provider-hostname');
+
+// From a specific provider with a custom file name
+const file = await storage.downloadFile('fid123...', null, 'provider-hostname', 'photo.jpg');
+```
+
+### Raw download
+
+```ts
+const file = await storage.downloadRaw('fid123...', 'provider-hostname');
+```
+
+## Deleting files
+```ts
+// Single file
+const txHash = await storage.deleteFile('fid123...');
+
+// Multiple files — batched into one transaction
+const txHashes = await storage.deleteFiles(['fid123...', 'fid456...']);
+```
+
+## Purchasing subscriptions
+
+```ts
+const txHash = await storage.purchaseSubscription(
+  1_000_000_000,    // bytes — minimum 1 GB
+  30,               // days — minimum 1 day
+  true,             // is address' default subscription
+);
+```

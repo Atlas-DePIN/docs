@@ -136,13 +136,13 @@ challenges or offline verification.
 ### createStorageHandler
 
 ```ts
-const handler: StorageHandler = client.createStorageHandler();
+const manager: StorageManager = client.createStorageHandler();
 ```
 
-Creates a new `StorageHandler` instance initialized with the current client
-and its connected wallet. The handler manages the full storage lifecycle:
-loading subscriptions, providers, drives, directory trees, file uploads, and
-encryption.
+Creates a new `StorageManager` instance initialized with the current client
+and its connected wallet. The manager handles the full storage lifecycle:
+subscriptions, providers, drives, directory trees, uploads with encryption,
+and downloads with automatic provider retry.
 
 ## Atlas Queries
 
